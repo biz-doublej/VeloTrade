@@ -1,0 +1,2 @@
+("{TICKER}" OR "{COMPANY}") AND ("earnings" OR "guidance" OR "outlook" OR "revenue")
+("{TICKER}" OR "{COMPANY}") AND ("price target" OR "upgrade" OR "downgrade")

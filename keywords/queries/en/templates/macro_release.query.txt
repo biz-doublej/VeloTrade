@@ -1,0 +1,3 @@
+("Federal Reserve" OR "FOMC") AND ("statement" OR "minutes" OR "dot plot")
+("CPI" OR "PCE" OR "PPI") AND ("inflation" OR "core")
+("nonfarm payrolls" OR "jobs report") AND ("wage growth" OR "unemployment rate")
