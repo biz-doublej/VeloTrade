@@ -84,3 +84,14 @@ training/experiments/
 # System files
 .DS_Store
 Thumbs.db
+
+# ------------------------------------------------------------------------------
+# Next.js / web frontend
+# ------------------------------------------------------------------------------
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+web/next-env.d.ts
+web/.turbo/
+web/tsconfig.tsbuildinfo
