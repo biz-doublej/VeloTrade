@@ -29,7 +29,12 @@
 - [x] **Day 9** 알림 (Discord rich embed + Slack mrkdwn + stdout)
   + 429 자동 재시도 + URL 마스킹 로깅 + 안전 truncate
   + /dashboard/alerts 페이지 — 최근 100건 + webhook 설정 안내
-- [ ] **Day 11** LLM 시그널 ↔ VeloTrade RAG 연동 (DART/네이버 공시·뉴스 이벤트 → LLM → 시그널)
+- [x] **Day 11** LLM 시그널 ↔ DART/네이버 이벤트 연동 (기반 완성)
+  + fetchers/{dart, naver_news}: 공시·뉴스 fetcher
+  + runner/event_dispatcher: 주기 polling + LRU dedupe + DB 기록
+  + bot.handle_event: 워치리스트 필터 + alert 기록 + LLMSignalStrategy 트리거
+  + CLI events subcommand + /dashboard/events 페이지
+  + 키 발급 후 즉시 동작
 - [ ] **Day 12** 리밸런싱: 목표 비중 vs 현재 비중 diff → 자동 주문
 - [ ] **Day 13** 백테스트 시각화 (equity curve, drawdown) + 멀티 거래소 통합 테스트
 - [ ] **Day 14** Paper trading 1-2일 실가동 + 문서·운영 매뉴얼

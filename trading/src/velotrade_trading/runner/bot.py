@@ -211,7 +211,37 @@ class TradingBot:
             await self._process_signal(sig, quote)
 
     async def handle_event(self, event: dict) -> None:
-        """외부에서 호출 가능한 이벤트 진입점 (LLM signal 용)."""
+        """외부에서 호출 가능한 이벤트 진입점 (EventDispatcher → LLM signal).
+
+        event 형식 (MarketEvent.as_strategy_input() 결과):
+          {source, category, symbol, title, summary, url, published_at, sources}
+
+        흐름:
+          1. 종목이 봇 watchlist 에 없으면 무시 (안전 + 비용 절감)
+          2. 각 strategy.on_event 호출 → Signal | None
+          3. Signal 있으면 RiskManager.validate → adapter.submit_order
+          4. DB 기록 (signals, orders, alerts)
+        """
+        # 워치리스트 필터링 — 봇은 자기 종목 이벤트만 처리
+        sym = event.get("symbol")
+        if sym and sym not in set(self.config.symbols):
+            log.debug("event.skipped.off_watchlist", symbol=sym)
+            return
+
+        if self.db:
+            await self.db.record_alert(
+                level="info",
+                alert_type="event",
+                title=f"event: {event.get('source')}:{event.get('category')} {sym or ''}",
+                body=str(event.get("title", ""))[:500],
+                symbol=sym,
+                meta={
+                    "url": event.get("url"),
+                    "published_at": event.get("published_at"),
+                    "summary": event.get("summary", "")[:1000],
+                },
+            )
+
         assert self._ctx is not None
         for strat in self.strategies:
             try:
