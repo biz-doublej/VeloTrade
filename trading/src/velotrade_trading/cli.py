@@ -66,7 +66,8 @@ def _build_adapter(exchange: str, mode: str) -> ExchangeAdapter:
     if exchange == "upbit":
         from velotrade_trading.adapters.upbit import UpbitExchange
 
-        upbit = UpbitExchange()
+        # paper 모드면 키 불필요 (시세만 사용). live 면 키 필수.
+        upbit = UpbitExchange(public_only=is_paper)
         if not is_paper:
             return upbit
         # Upbit 는 testnet 없음 → PaperExchange 로 감싼다.
@@ -150,6 +151,43 @@ async def _resolve_symbols(
     raise SystemExit("--symbols / config.symbols / watchlist all empty")
 
 
+async def _build_bot(
+    exchange: str,
+    mode: str,
+    *,
+    args_symbols: str | None = None,
+    config_data: dict[str, Any] | None = None,
+    dry_run: bool = False,
+    no_db: bool = False,
+) -> TradingBot:
+    """단일 거래소 봇 인스턴스 생성 (공용 헬퍼)."""
+    config_data = config_data or {}
+
+    db, account_id = await _build_db_and_account(exchange, mode, no_db)
+    symbols = await _resolve_symbols(
+        args_symbols, config_data.get("symbols", []), db, exchange
+    )
+
+    adapter = _build_adapter(exchange, mode)
+    strategies = _build_strategies(config_data.get("strategies"))
+    risk = RiskManager(_risk_from_env())
+    alerts = AlertManager.from_env()
+
+    return TradingBot(
+        adapter=adapter,
+        strategies=strategies,
+        risk=risk,
+        alerts=alerts,
+        db=db,
+        account_id=account_id,
+        config=BotConfig(
+            symbols=symbols,
+            dry_run=dry_run,
+            require_paper=(mode == "paper"),
+        ),
+    )
+
+
 async def _run(args: argparse.Namespace) -> None:
     load_dotenv()
 
@@ -168,31 +206,13 @@ async def _run(args: argparse.Namespace) -> None:
             "Re-run with --i-know-this-is-live to confirm."
         )
 
-    # DB + 계좌 ID 확보 (실패해도 진행)
-    db, account_id = await _build_db_and_account(exchange, mode, args.no_db)
-
-    # 종목 결정
-    symbols = await _resolve_symbols(
-        args.symbols, config_data.get("symbols", []), db, exchange
-    )
-
-    adapter = _build_adapter(exchange, mode)
-    strategies = _build_strategies(config_data.get("strategies"))
-    risk = RiskManager(_risk_from_env())
-    alerts = AlertManager.from_env()
-
-    bot = TradingBot(
-        adapter=adapter,
-        strategies=strategies,
-        risk=risk,
-        alerts=alerts,
-        db=db,
-        account_id=account_id,
-        config=BotConfig(
-            symbols=symbols,
-            dry_run=args.dry_run,
-            require_paper=(mode == "paper"),
-        ),
+    bot = await _build_bot(
+        exchange,
+        mode,
+        args_symbols=args.symbols,
+        config_data=config_data,
+        dry_run=args.dry_run,
+        no_db=args.no_db,
     )
 
     try:
@@ -201,6 +221,47 @@ async def _run(args: argparse.Namespace) -> None:
         log.info("bot.shutdown.keyboard")
     finally:
         await bot.stop()
+
+
+async def _run_all(args: argparse.Namespace) -> None:
+    """3개 거래소 봇 동시 실행 (paper 전용)."""
+    load_dotenv()
+
+    if args.mode == "live":
+        raise SystemExit("run-all 은 paper 전용. LIVE 는 거래소별 run 명령 사용.")
+
+    exchanges = ["alpaca", "binance", "upbit"]
+    log.info("multi-bot.start", exchanges=exchanges)
+
+    bots: list[TradingBot] = []
+    for ex in exchanges:
+        try:
+            bot = await _build_bot(
+                ex,
+                "paper",
+                args_symbols=None,        # DB watchlist 자동
+                dry_run=args.dry_run,
+                no_db=args.no_db,
+            )
+            bots.append(bot)
+            log.info("multi-bot.built", exchange=ex, symbols=bot.config.symbols)
+        except Exception as e:
+            log.warning("multi-bot.build.failed", exchange=ex, error=str(e))
+
+    if not bots:
+        raise SystemExit("no bots built — all exchanges failed")
+
+    try:
+        # 모든 봇 동시 실행
+        await asyncio.gather(*(bot.start() for bot in bots))
+    except KeyboardInterrupt:
+        log.info("multi-bot.shutdown.keyboard")
+    finally:
+        # 모든 봇 정리 (한 번에 — 실패해도 다른 봇은 계속 정리)
+        await asyncio.gather(
+            *(bot.stop() for bot in bots),
+            return_exceptions=True,
+        )
 
 
 def main() -> None:
@@ -229,6 +290,18 @@ def main() -> None:
         help="Supabase 기록 비활성 (DB 없이 봇 실행)",
     )
 
+    # run-all: 3개 거래소 (Alpaca + Binance + Upbit paper) 동시 실행
+    run_all = sub.add_parser(
+        "run-all",
+        help="3개 거래소 paper 봇 동시 실행 (DB watchlist 자동 사용)",
+    )
+    run_all.add_argument("--mode", choices=["paper"], default="paper",
+                        help="paper 전용 (LIVE 는 거래소별 run 명령 사용)")
+    run_all.add_argument("--dry-run", action="store_true",
+                        help="시그널만 출력, 주문 차단")
+    run_all.add_argument("--no-db", action="store_true",
+                        help="Supabase 기록 비활성")
+
     args = parser.parse_args()
     if args.cmd == "run":
         try:
@@ -237,6 +310,14 @@ def main() -> None:
             raise
         except Exception as e:
             log.error("bot.fatal", error=repr(e))
+            sys.exit(1)
+    elif args.cmd == "run-all":
+        try:
+            asyncio.run(_run_all(args))
+        except SystemExit:
+            raise
+        except Exception as e:
+            log.error("multi-bot.fatal", error=repr(e))
             sys.exit(1)
 
 

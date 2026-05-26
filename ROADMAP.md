@@ -10,7 +10,9 @@
 - [x] **Day 2** Alpaca paper 실가동 (시세·계좌·주문 end-to-end)
 - [x] **Day 2** Supabase 스키마 + Python DB 기록 레이어 + 시드 데이터 (3 계좌, 17 종목)
 - [x] **Day 2** Alpaca WebSocket 시세 스트림 (IEX feed)
-- [ ] **Day 3** Binance testnet WebSocket + Upbit paper(시뮬레이터) 실가동
+- [x] **Day 3** Binance testnet WebSocket + 실주문 (BTCUSDT 매수 즉시 체결)
+- [x] **Day 3** Upbit WebSocket 시세 (public_only) + PaperExchange 시뮬레이션
+- [x] **Day 3** 멀티 거래소 동시 운영 (`run-all` CLI, asyncio.gather)
 - [ ] **Day 4** RSI / MA cross 백테스트 엔진 (vectorbt) + 결과 저장
 - [ ] **Day 5** Risk manager 통합 테스트 + dry-run 모드 검증
 - [ ] **Day 6** Web 대시보드 1차: 포지션·주문·시그널 조회 페이지

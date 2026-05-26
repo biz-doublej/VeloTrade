@@ -91,11 +91,18 @@ class BinanceExchange(ExchangeAdapter):
     # --- 인증 헬퍼 -----------------------------------------------------------
 
     def _sign(self, params: dict[str, str]) -> dict[str, str]:
+        """Binance signed 요청 — timestamp + recvWindow + HMAC-SHA256 signature.
+
+        recvWindow=5000ms 로 시간 차 ±5초 허용 (Binance 기본 5초).
+        timestamp 는 local time - 1초 (server 보다 약간 과거로 안전 마진).
+        """
         import hashlib
         import hmac
         from urllib.parse import urlencode
 
-        params["timestamp"] = str(int(time.time() * 1000))
+        # local 이 server 보다 빠를 수 있어 1초 보수적으로 빼기
+        params["timestamp"] = str(int(time.time() * 1000) - 1000)
+        params.setdefault("recvWindow", "5000")
         query = urlencode(params)
         sig = hmac.new(self._secret.encode(), query.encode(), hashlib.sha256).hexdigest()
         params["signature"] = sig
@@ -164,14 +171,67 @@ class BinanceExchange(ExchangeAdapter):
         return [Decimal(k[4]) for k in r.json()]
 
     async def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Quote]:
-        # 임시 polling. Day 2-3 에 websocket 으로 교체.
+        """Binance WebSocket bookTicker 스트림 (다중 심볼 combined stream).
+
+        Testnet: wss://stream.testnet.binance.vision/stream?streams=...
+        Live:    wss://stream.binance.com:9443/stream?streams=...
+
+        bookTicker = 실시간 best bid/ask. 인증 불필요.
+        Trade 채널은 별도. bookTicker 만으로 충분.
+        연결 끊김 시 5초 후 재연결.
+        """
+        import json
+        import websockets
+
+        ws_base = (
+            "wss://stream.testnet.binance.vision/stream"
+            if self._is_paper
+            else "wss://stream.binance.com:9443/stream"
+        )
+        # bookTicker stream 이름은 lowercase symbol
+        streams = "/".join(f"{s.lower()}@bookTicker" for s in symbols)
+        url = f"{ws_base}?streams={streams}"
+
         while True:
-            for sym in symbols:
-                try:
-                    yield await self.get_quote(sym)
-                except Exception:
-                    continue
-            await asyncio.sleep(2.0)
+            try:
+                async with websockets.connect(
+                    url, ping_interval=180, ping_timeout=30, max_size=2**20
+                ) as ws:
+                    async for raw in ws:
+                        try:
+                            envelope = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                        data = envelope.get("data") or envelope
+                        # bookTicker: {u:updateId, s:SYMBOL, b:bidPrice, B:bidQty, a:askPrice, A:askQty}
+                        sym = data.get("s")
+                        bp = data.get("b")
+                        ap = data.get("a")
+                        if not (sym and bp and ap):
+                            continue
+                        try:
+                            bid = Decimal(bp)
+                            ask = Decimal(ap)
+                        except Exception:
+                            continue
+                        yield Quote(
+                            symbol=sym,
+                            bid=bid,
+                            ask=ask,
+                            last=(bid + ask) / Decimal(2),
+                            timestamp=datetime.utcnow(),
+                            exchange=self.name,
+                            asset_class=AssetClass.CRYPTO,
+                            raw=data,
+                        )
+            except (
+                websockets.exceptions.ConnectionClosed,
+                websockets.exceptions.WebSocketException,
+                ConnectionError,
+                OSError,
+            ):
+                await asyncio.sleep(5.0)
+                continue
 
     # --- 주문 ---------------------------------------------------------------
 

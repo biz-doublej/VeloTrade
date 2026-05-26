@@ -48,11 +48,16 @@ class UpbitExchange(ExchangeAdapter):
         *,
         access_key: str | None = None,
         secret_key: str | None = None,
+        public_only: bool = False,
     ) -> None:
+        """access/secret 없거나 public_only=True 면 시세만 사용 가능 (잔고·주문 불가).
+
+        Paper 시뮬레이션 시 PaperExchange 가 시세 feed 로만 사용하므로
+        키 없이 생성 가능해야 함.
+        """
         self._access = access_key or os.getenv("UPBIT_ACCESS_KEY", "")
         self._secret = secret_key or os.getenv("UPBIT_SECRET_KEY", "")
-        if not self._access or not self._secret:
-            raise RuntimeError("Upbit credentials missing — set UPBIT_ACCESS_KEY/SECRET_KEY")
+        self._public_only = public_only or not (self._access and self._secret)
         self._base_url = "https://api.upbit.com"
         self._client = httpx.AsyncClient(base_url=self._base_url, timeout=httpx.Timeout(15.0))
 
@@ -80,6 +85,10 @@ class UpbitExchange(ExchangeAdapter):
     def _jwt_header(self, query: dict[str, str] | None = None) -> dict[str, str]:
         import jwt  # PyJWT (alpaca-py 의존성으로 함께 설치되거나 명시 설치)
 
+        if self._public_only:
+            raise RuntimeError(
+                "Upbit public_only mode — auth required. Set UPBIT_ACCESS_KEY/SECRET_KEY."
+            )
         payload: dict[str, str | int] = {
             "access_key": self._access,
             "nonce": str(uuid.uuid4()),
@@ -168,14 +177,65 @@ class UpbitExchange(ExchangeAdapter):
         return [Decimal(str(c["trade_price"])) for c in reversed(r.json())]
 
     async def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Quote]:
-        # 임시 polling. Day 2-3 에 wss://api.upbit.com/websocket/v1 로 교체.
+        """Upbit WebSocket ticker 스트림.
+
+        wss://api.upbit.com/websocket/v1 — 인증 불필요 (시세 채널)
+        프로토콜: 클라이언트가 JSON 배열 (ticket + type+codes) 을 보내면
+                 서버가 ticker 메시지 스트림.
+        연결 끊김 시 5초 후 재연결.
+        """
+        import json
+        import websockets
+
+        url = "wss://api.upbit.com/websocket/v1"
+        subscribe_msg = json.dumps(
+            [
+                {"ticket": "velotrade"},
+                {"type": "ticker", "codes": symbols, "isOnlySnapshot": False},
+                {"format": "DEFAULT"},
+            ]
+        )
+
         while True:
-            for sym in symbols:
-                try:
-                    yield await self.get_quote(sym)
-                except Exception:
-                    continue
-            await asyncio.sleep(1.5)
+            try:
+                async with websockets.connect(
+                    url, ping_interval=120, ping_timeout=30, max_size=2**20
+                ) as ws:
+                    await ws.send(subscribe_msg)
+
+                    async for raw in ws:
+                        # Upbit 는 binary 또는 text 둘 다 가능 — JSON 파싱
+                        try:
+                            data = json.loads(raw)
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+                        if not isinstance(data, dict):
+                            continue
+                        if data.get("type") != "ticker":
+                            continue
+                        code = data.get("code") or data.get("market")
+                        price = data.get("trade_price")
+                        if not (code and price is not None):
+                            continue
+                        last = Decimal(str(price))
+                        yield Quote(
+                            symbol=code,
+                            bid=last,
+                            ask=last,
+                            last=last,
+                            timestamp=datetime.utcnow(),
+                            exchange=self.name,
+                            asset_class=AssetClass.CRYPTO,
+                            raw=data,
+                        )
+            except (
+                websockets.exceptions.ConnectionClosed,
+                websockets.exceptions.WebSocketException,
+                ConnectionError,
+                OSError,
+            ):
+                await asyncio.sleep(5.0)
+                continue
 
     # --- 주문 ---------------------------------------------------------------
 
