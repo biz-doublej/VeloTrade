@@ -15,7 +15,9 @@
 - [x] **Day 3** 멀티 거래소 동시 운영 (`run-all` CLI, asyncio.gather)
 - [x] **Day 4** 자체 백테스트 엔진 + RSI/MA cross grid search (32건 DB 저장)
 - [x] **Day 4** 전략 파라미터 튜닝 — Best RSI(14, 30/75) Sharpe 1.10 return +102.96%
-- [ ] **Day 5** Risk manager 통합 테스트 + dry-run 모드 검증
+- [x] **Day 5** RiskManager 통합 테스트 13건 (위반 시나리오 100% 차단)
+- [x] **Day 5** 백테스트 fetch 정확도 — start/end 파라미터 + warmup 단축
+- [x] **Day 5** 종목 확장 백테스트 24종 — sweet spot 도출 (RSI(21, 30/75))
 - [ ] **Day 6** Web 대시보드 1차: 포지션·주문·시그널 조회 페이지
 - [ ] **Day 7** Web 대시보드 2차: 워치리스트 편집·전략 활성화 UI
 - [ ] **Day 8** 사용자 인증 (Supabase Auth, 이메일)

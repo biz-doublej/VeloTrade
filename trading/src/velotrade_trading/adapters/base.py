@@ -57,9 +57,19 @@ class ExchangeAdapter(ABC):
 
     @abstractmethod
     async def get_historical_closes(
-        self, symbol: str, *, limit: int = 200, interval: str = "1d"
+        self,
+        symbol: str,
+        *,
+        limit: int = 200,
+        interval: str = "1d",
+        start: "datetime | None" = None,
+        end: "datetime | None" = None,
     ) -> list[Decimal]:
-        """기술 지표 계산용 종가 시리즈 (오래된 것 → 최근 순)."""
+        """기술 지표 계산용 종가 시리즈 (오래된 것 → 최근 순).
+
+        start/end 가 주어지면 그 범위만 가져오고 limit 은 상한으로만 사용.
+        둘 다 None 이면 어댑터 기본 (최근 N 개) 동작.
+        """
 
     @abstractmethod
     def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Quote]:

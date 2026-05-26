@@ -158,7 +158,13 @@ class UpbitExchange(ExchangeAdapter):
         )
 
     async def get_historical_closes(
-        self, symbol: str, *, limit: int = 200, interval: str = "1d"
+        self,
+        symbol: str,
+        *,
+        limit: int = 200,
+        interval: str = "1d",
+        start: "datetime | None" = None,
+        end: "datetime | None" = None,
     ) -> list[Decimal]:
         # interval: minutes/{1,3,5,15,30,60,240}, days, weeks, months
         unit_path = {
@@ -168,10 +174,11 @@ class UpbitExchange(ExchangeAdapter):
             "1h": "minutes/60",
             "1d": "days",
         }.get(interval, "days")
-        r = await self._client.get(
-            f"/v1/candles/{unit_path}",
-            params={"market": symbol, "count": min(limit, 200)},
-        )
+        params: dict[str, str | int] = {"market": symbol, "count": min(limit, 200)}
+        if end is not None:
+            # Upbit 는 'to' 파라미터 (해당 시각 이전 캔들). ISO 8601 + KST or UTC 'Z'
+            params["to"] = end.strftime("%Y-%m-%dT%H:%M:%SZ")
+        r = await self._client.get(f"/v1/candles/{unit_path}", params=params)
         r.raise_for_status()
         # Upbit 응답은 최신 → 오래된 순. 뒤집어서 통일.
         return [Decimal(str(c["trade_price"])) for c in reversed(r.json())]

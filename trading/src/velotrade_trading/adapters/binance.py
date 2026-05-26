@@ -160,12 +160,20 @@ class BinanceExchange(ExchangeAdapter):
         )
 
     async def get_historical_closes(
-        self, symbol: str, *, limit: int = 200, interval: str = "1d"
+        self,
+        symbol: str,
+        *,
+        limit: int = 200,
+        interval: str = "1d",
+        start: "datetime | None" = None,
+        end: "datetime | None" = None,
     ) -> list[Decimal]:
-        r = await self._client.get(
-            "/api/v3/klines",
-            params={"symbol": symbol, "interval": interval, "limit": limit},
-        )
+        params: dict[str, str | int] = {"symbol": symbol, "interval": interval, "limit": limit}
+        if start is not None:
+            params["startTime"] = int(start.timestamp() * 1000)
+        if end is not None:
+            params["endTime"] = int(end.timestamp() * 1000)
+        r = await self._client.get("/api/v3/klines", params=params)
         r.raise_for_status()
         # [openTime, open, high, low, close, volume, ...]
         return [Decimal(k[4]) for k in r.json()]

@@ -81,9 +81,17 @@ class PaperExchange(ExchangeAdapter):
         return await self._feed.get_quote(symbol)
 
     async def get_historical_closes(
-        self, symbol: str, *, limit: int = 200, interval: str = "1d"
+        self,
+        symbol: str,
+        *,
+        limit: int = 200,
+        interval: str = "1d",
+        start: "datetime | None" = None,
+        end: "datetime | None" = None,
     ) -> list[Decimal]:
-        return await self._feed.get_historical_closes(symbol, limit=limit, interval=interval)
+        return await self._feed.get_historical_closes(
+            symbol, limit=limit, interval=interval, start=start, end=end
+        )
 
     async def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Quote]:
         async for quote in self._feed.stream_quotes(symbols):

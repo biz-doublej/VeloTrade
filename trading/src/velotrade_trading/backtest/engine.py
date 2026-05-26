@@ -97,12 +97,18 @@ class BacktestEngine:
     async def run(
         self, *, adapter: ExchangeAdapter, config: BacktestConfig
     ) -> BacktestResult:
-        # 1. 종목별 historical close 로드
+        # 1. 종목별 historical close 로드 — config.start/end 명시 사용
+        start_dt = datetime.combine(config.start, datetime.min.time())
+        end_dt = datetime.combine(config.end, datetime.max.time())
         closes_by_symbol: dict[str, list[Decimal]] = {}
         for sym in config.symbols:
             try:
                 series = await adapter.get_historical_closes(
-                    sym, limit=2000, interval=config.interval
+                    sym,
+                    limit=5000,
+                    interval=config.interval,
+                    start=start_dt,
+                    end=end_dt,
                 )
             except Exception as e:
                 log.warning("backtest.fetch.failed", symbol=sym, error=str(e)[:200])
@@ -120,10 +126,17 @@ class BacktestEngine:
         steps = min_len
         log.info("backtest.loaded", symbols=list(closes_by_symbol.keys()), steps=steps)
 
-        # 2. warmup — 첫 30% 또는 전략 window_size 만큼 (시그널 생성 없이 RSI/MA 충전)
+        # 2. warmup — 지표 계산 최소치만 (RSI period+1, MA slow+1).
+        #    더 길게 잡으면 짧은 기간 백테스트에서 시그널 거의 다 누락.
+        min_indicator_warmup = max(
+            getattr(self.strategy, "period", 0) + 1,
+            getattr(self.strategy, "slow", 0) + 1,
+            15,                  # 최소 안전치
+        )
         warmup_n = min(
-            max(int(steps * 0.3), 30),
+            min_indicator_warmup,
             self.strategy.window_size,
+            max(int(steps * 0.1), 15),    # steps 가 매우 길면 10% 까지는 허용
             steps - 1,
         )
 

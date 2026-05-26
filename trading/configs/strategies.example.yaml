@@ -4,43 +4,55 @@
 # 사용: cp configs/strategies.example.yaml configs/strategies.yaml
 #       python -m velotrade_trading run --config configs/strategies.yaml
 #
-# 파라미터는 Day 4 백테스트 grid search 결과 기준 (Top by Sharpe).
-# 5.8년치 AAPL/MSFT/NVDA 일봉:
-#   - RSI(14, 30/75) : Sharpe 1.10  return +102.96%  drawdown 19.15%
-#   - RSI(21, 30/70) : Sharpe 1.01  return  +37.79%  drawdown  8.69%  (안전 우선)
-#   - RSI(14, 25/80) : Sharpe 1.03  return  +53.75%  drawdown 13.10%
+# 파라미터 근거: Day 5 백테스트 grid search (24 symbols × 9 params = 216 건, 2년)
+#   - 파라미터 분포 (best by sharpe):
+#       period:    21 (57%)  > 14 (24%) > 9 (19%)
+#       oversold:  30 (62%)  > 25 (38%)
+#       overbought:75 (76%)  > 70 (24%)
+#   - 종목군 평균 Sharpe:
+#       Index ETF       1.62  (SPY/QQQ/IWM/DIA)
+#       Sector ETF      1.23  (XLF/XLE/XLK/XLV)
+#       Mag 7           1.20
+#       Other Stock     1.18
+#       Crypto (Binance) — 데이터 부족 (testnet limit)
 #
-# ⚠️ 백테스트 결과는 보장 아님:
-#   - AAPL/MSFT/NVDA 는 mega-cap 성장주 — 대부분 종목엔 다르게 작동
-#   - intraday 동작·세금·실슬리피지 미반영
-#   - past performance ≠ future result
+# Top 5 by Sharpe (개별 종목):
+#   QQQ    RSI(21, 30/75) Sharpe 1.86 return +10.44% DD 2.57%
+#   GOOGL  RSI(14, 25/75) Sharpe 1.79
+#   SPY    RSI(21, 30/75) Sharpe 1.75
+#   XLE    RSI( 9, 25/75) Sharpe 1.73
+#   XLK    RSI(21, 30/70) Sharpe 1.65
+#
+# ⚠️ 권장: 변동성 큰 NVDA/META 는 따로 period=9 또는 watchlist 제외 검토
 
-# 거래소·모드
-exchange: alpaca       # alpaca | binance | upbit
+exchange: alpaca
 mode: paper
 
-# 추적 종목 (지정 없으면 vt.watchlist_items 자동 사용)
+# Sharpe 1.5+ 인 핵심 종목만
 symbols:
+  - SPY
+  - QQQ
   - AAPL
-  - MSFT
-  - NVDA
+  - GOOGL
+  - XLK
+  - XLE
 
-# 전략 — 동시 다중 전략 OK
 strategies:
-  # 메인: drawdown 우선 (Sharpe 1.01, dd 8.69%)
+  # 메인: 24 종목 grid 평균 sweet spot
   - name: rsi
     period: 21
     oversold: 30
-    overbought: 70
+    overbought: 75
     size_pct: 0.05
 
-  # 보조: golden/dead cross (Sharpe 0.36, trends 잡을 때만)
-  # - name: ma_cross
-  #   fast: 20
-  #   slow: 50
+  # 변동성 큰 종목용 (별도 인스턴스 — 추후 종목별 분리 시)
+  # - name: rsi
+  #   period: 9
+  #   oversold: 25
+  #   overbought: 75
   #   size_pct: 0.03
 
-  # LLM 시그널 (Day 11 이후 정식 통합)
+  # LLM 시그널 (Day 11 정식 통합 예정)
   # - name: llm_signal
   #   provider: openai
   #   model: gpt-4o-mini
