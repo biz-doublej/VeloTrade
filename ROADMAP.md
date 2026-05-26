@@ -18,7 +18,9 @@
 - [x] **Day 5** RiskManager 통합 테스트 13건 (위반 시나리오 100% 차단)
 - [x] **Day 5** 백테스트 fetch 정확도 — start/end 파라미터 + warmup 단축
 - [x] **Day 5** 종목 확장 백테스트 24종 — sweet spot 도출 (RSI(21, 30/75))
-- [ ] **Day 6** Web 대시보드 1차: 포지션·주문·시그널 조회 페이지
+- [x] **Day 6** Web 대시보드 1차: Positions/Orders/Signals/Backtests 페이지
+  + Supabase 서버 클라이언트 (vt 스키마 + service_role)
+  + 자체 UI 컴포넌트 (data-table/badge/page-header, Tailwind 3 호환)
 - [ ] **Day 7** Web 대시보드 2차: 워치리스트 편집·전략 활성화 UI
 - [ ] **Day 8** 사용자 인증 (Supabase Auth, 이메일)
 - [ ] **Day 9** 사용자 인증 (Supabase Auth, 이메일 — 본인 1계정)
