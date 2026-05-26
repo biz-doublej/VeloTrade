@@ -33,6 +33,8 @@ class BotConfig:
     require_paper: bool = True
     """True 면 어댑터의 is_paper == False 일 때 시작 거부 (안전 가드)."""
     refresh_portfolio_every_sec: int = 30
+    reload_watchlist_every_sec: int = 30
+    """DB 의 watchlist_items 를 N초마다 다시 fetch — 즉시 반영."""
 
 
 class TradingBot:
@@ -100,10 +102,11 @@ class TradingBot:
                 except Exception as e:
                     log.warning("warmup.failed", strategy=strat.name, symbol=sym, error=str(e))
 
-        # 동시 실행: 시세 루프 + 포트폴리오 주기 동기화
+        # 동시 실행: 시세 루프 + 포트폴리오 주기 동기화 + watchlist 주기 reload
         await asyncio.gather(
             self._quote_loop(),
             self._portfolio_loop(),
+            self._watchlist_loop(),
         )
 
     async def stop(self) -> None:
@@ -136,6 +139,50 @@ class TradingBot:
                 await self._refresh_portfolio()
             except Exception as e:
                 log.warning("portfolio.refresh.failed", error=str(e))
+
+    async def _watchlist_loop(self) -> None:
+        """DB watchlist 를 주기적으로 다시 fetch, 변경 감지 시 self.config.symbols 갱신.
+
+        WebSocket 재구독은 다음 connection cycle 에서 자연 처리 — 봇은 멈춤 없음.
+        DB 없거나 watchlist 비어있으면 변경 안 함.
+        """
+        from velotrade_trading.db.client import get_watchlist
+        if not self.db:
+            return
+        while not self._stopping:
+            await asyncio.sleep(self.config.reload_watchlist_every_sec)
+            try:
+                new_symbols = await get_watchlist(self.db, exchange=self.adapter.name)
+            except Exception as e:
+                log.warning("watchlist.reload.failed", error=str(e))
+                continue
+            if not new_symbols:
+                continue
+            current = set(self.config.symbols)
+            incoming = set(new_symbols)
+            if current == incoming:
+                continue
+            added = incoming - current
+            removed = current - incoming
+            self.config.symbols = sorted(incoming)
+            log.info(
+                "watchlist.reload",
+                added=sorted(added),
+                removed=sorted(removed),
+                total=len(incoming),
+            )
+            await self.alerts.info(
+                "Watchlist updated",
+                f"added={sorted(added)} removed={sorted(removed)} → {sorted(incoming)}",
+            )
+            # warmup 새 종목 (시그널이 즉시 가능하도록)
+            if self._ctx is not None:
+                for sym in added:
+                    for strat in self.strategies:
+                        try:
+                            await strat.warmup(sym, self._ctx)
+                        except Exception as e:
+                            log.warning("watchlist.warmup.failed", symbol=sym, error=str(e))
 
     async def _refresh_portfolio(self) -> None:
         cash, positions = await asyncio.gather(

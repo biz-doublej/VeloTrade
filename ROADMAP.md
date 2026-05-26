@@ -21,7 +21,8 @@
 - [x] **Day 6** Web 대시보드 1차: Positions/Orders/Signals/Backtests 페이지
   + Supabase 서버 클라이언트 (vt 스키마 + service_role)
   + 자체 UI 컴포넌트 (data-table/badge/page-header, Tailwind 3 호환)
-- [ ] **Day 7** Web 대시보드 2차: 워치리스트 편집·전략 활성화 UI
+- [x] **Day 7** Web 대시보드 2차: Watchlist + Strategies CRUD (Server Actions)
+  + 봇 watchlist polling reload — 30s 마다 자동 반영
 - [ ] **Day 8** 사용자 인증 (Supabase Auth, 이메일)
 - [ ] **Day 9** 사용자 인증 (Supabase Auth, 이메일 — 본인 1계정)
 - [ ] **Day 10** 알림 (Discord/Slack/Email), 봇 lifecycle 이벤트
