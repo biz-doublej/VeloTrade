@@ -23,7 +23,9 @@
   + 자체 UI 컴포넌트 (data-table/badge/page-header, Tailwind 3 호환)
 - [x] **Day 7** Web 대시보드 2차: Watchlist + Strategies CRUD (Server Actions)
   + 봇 watchlist polling reload — 30s 마다 자동 반영
-- [ ] **Day 8** 사용자 인증 (Supabase Auth, 이메일)
+- [x] **Day 8** Supabase Auth (Magic Link) + middleware 가드
+  + ALLOWED_EMAIL env 화이트리스트로 본인 1계정만 허용
+  + /login, /auth/callback, /auth/logout, sidebar 사용자 정보
 - [ ] **Day 9** 사용자 인증 (Supabase Auth, 이메일 — 본인 1계정)
 - [ ] **Day 10** 알림 (Discord/Slack/Email), 봇 lifecycle 이벤트
 - [ ] **Day 11** LLM 시그널 ↔ VeloTrade RAG 연동 (DART/네이버 공시·뉴스 이벤트 → LLM → 시그널)
