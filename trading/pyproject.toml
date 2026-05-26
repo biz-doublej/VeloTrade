@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "velotrade-trading"
+version = "0.1.0"
+description = "VeloTrade 자동매매 모듈 (Alpaca + Binance + Upbit 멀티 어댑터)"
+requires-python = ">=3.11"
+license = { text = "Private" }
+dependencies = [
+    # 코어
+    "httpx>=0.27",
+    "websockets>=12.0",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "rich>=13.7",
+    "structlog>=24.1",
+    # 거래소 SDK
+    "alpaca-py>=0.30",          # 미국 주식
+    "python-binance>=1.0.19",   # 코인 (글로벌)
+    "pyupbit>=0.2.34",          # 코인 (국내)
+    "pyjwt>=2.8",               # Upbit JWT 인증
+    # DB
+    "supabase>=2.5",
+    # 지표 계산
+    "numpy>=1.26",
+    "pandas>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+backtest = [
+    "vectorbt>=0.26",
+    "matplotlib>=3.8",
+]
+
+[project.scripts]
+velotrade-trading = "velotrade_trading.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
