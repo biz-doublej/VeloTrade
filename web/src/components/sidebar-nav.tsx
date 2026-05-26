@@ -12,6 +12,7 @@ const ITEMS = [
   { href: "/dashboard/watchlist", label: "Watchlist", emoji: "👁️" },
   { href: "/dashboard/strategies", label: "Strategies", emoji: "⚙️" },
   { href: "/dashboard/alerts", label: "Alerts", emoji: "🔔" },
+  { href: "/dashboard/events", label: "Events", emoji: "🗞️" },
 ];
 
 export function SidebarNav() {

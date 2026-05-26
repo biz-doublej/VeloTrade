@@ -224,6 +224,46 @@ async def _run(args: argparse.Namespace) -> None:
         await bot.stop()
 
 
+async def _run_events(args: argparse.Namespace) -> None:
+    """이벤트 폴러 단독 실행 — fetcher → dedupe → DB 기록 (봇 없이).
+
+    봇과 같이 돌리려면 추후 run-all 에 통합.
+    """
+    from velotrade_trading.fetchers import DartFetcher, NaverNewsFetcher
+    from velotrade_trading.runner.event_dispatcher import EventDispatcher
+
+    load_dotenv()
+
+    fetchers: list = []
+    if os.getenv("DART_API_KEY"):
+        fetchers.append(DartFetcher())
+    else:
+        log.warning("events.dart.disabled", reason="DART_API_KEY missing")
+    if os.getenv("NAVER_CLIENT_ID") and os.getenv("NAVER_CLIENT_SECRET"):
+        fetchers.append(NaverNewsFetcher())
+    else:
+        log.warning("events.naver.disabled", reason="NAVER_CLIENT_ID/SECRET missing")
+
+    if not fetchers:
+        raise SystemExit("no fetchers enabled — set DART_API_KEY or NAVER_CLIENT_ID/SECRET in .env")
+
+    db = None if args.no_db else DBRecorder()
+    dispatcher = EventDispatcher(
+        fetchers=fetchers,
+        handlers=[],          # bot 없음 — DB 기록만
+        db=db,
+        poll_interval_sec=args.interval,
+    )
+    try:
+        await dispatcher.run()
+    except KeyboardInterrupt:
+        log.info("events.shutdown.keyboard")
+    finally:
+        await dispatcher.stop()
+        if db:
+            await db.close()
+
+
 async def _run_backtest(args: argparse.Namespace) -> None:
     """단일 또는 grid search 백테스트 실행."""
     from datetime import date as date_cls, datetime as datetime_cls
@@ -406,6 +446,12 @@ def main() -> None:
         help="Supabase 기록 비활성 (DB 없이 봇 실행)",
     )
 
+    # events: fetcher polling 단독 실행
+    ev = sub.add_parser("events", help="DART/네이버 등 이벤트 fetcher polling")
+    ev.add_argument("--interval", type=int, default=300,
+                    help="polling 간격 (초, 기본 300=5분)")
+    ev.add_argument("--no-db", action="store_true", help="DB 기록 비활성")
+
     # backtest: 단일/grid search 백테스트
     bt = sub.add_parser("backtest", help="historical 데이터로 전략 백테스트")
     bt.add_argument("--exchange", choices=["alpaca", "binance", "upbit"], default="alpaca",
@@ -455,6 +501,14 @@ def main() -> None:
             raise
         except Exception as e:
             log.error("backtest.fatal", error=repr(e))
+            sys.exit(1)
+    elif args.cmd == "events":
+        try:
+            asyncio.run(_run_events(args))
+        except SystemExit:
+            raise
+        except Exception as e:
+            log.error("events.fatal", error=repr(e))
             sys.exit(1)
 
 
