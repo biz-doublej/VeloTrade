@@ -202,6 +202,51 @@ class DBRecorder:
         )
         return row.get("position_id") if row else None
 
+    async def record_backtest(
+        self,
+        *,
+        strategy_type: str,
+        symbols: list[str],
+        start_date: str,             # ISO YYYY-MM-DD
+        end_date: str,
+        initial_capital: Decimal,
+        final_value: Decimal,
+        total_return_pct: float,
+        sharpe: float,
+        max_drawdown_pct: float,
+        trade_count: int,
+        win_rate_pct: float,
+        instance_id: str | None = None,
+        params: dict[str, Any] | None = None,
+        trades_summary: list[dict[str, Any]] | None = None,
+    ) -> str | None:
+        results_json = {
+            "params": params or {},
+            "trades_count": len(trades_summary or []),
+            # 처음/마지막 50개만 저장 (큰 결과 방지)
+            "trades_head": (trades_summary or [])[:50],
+            "trades_tail": (trades_summary or [])[-50:] if trades_summary and len(trades_summary) > 50 else [],
+        }
+        row = await self._insert(
+            "backtests",
+            {
+                "instance_id": instance_id,
+                "strategy_type": strategy_type,
+                "symbols": symbols,
+                "start_date": start_date,
+                "end_date": end_date,
+                "initial_capital": initial_capital,
+                "final_value": final_value,
+                "total_return_pct": total_return_pct,
+                "sharpe": sharpe,
+                "max_drawdown_pct": max_drawdown_pct,
+                "trade_count": trade_count,
+                "win_rate_pct": win_rate_pct,
+                "results": results_json,
+            },
+        )
+        return row.get("backtest_id") if row else None
+
     async def record_alert(
         self,
         *,

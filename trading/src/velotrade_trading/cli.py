@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 
 from velotrade_trading.adapters.base import ExchangeAdapter
 from velotrade_trading.adapters.paper import PaperExchange
+from velotrade_trading.backtest import BacktestConfig, BacktestEngine, BacktestResult
 from velotrade_trading.core.risk import RiskConfig, RiskManager
 from velotrade_trading.db.client import DBRecorder, get_or_create_account, get_watchlist
 from velotrade_trading.runner.alerts import AlertManager
@@ -223,6 +224,121 @@ async def _run(args: argparse.Namespace) -> None:
         await bot.stop()
 
 
+async def _run_backtest(args: argparse.Namespace) -> None:
+    """단일 또는 grid search 백테스트 실행."""
+    from datetime import date as date_cls, datetime as datetime_cls
+    from decimal import Decimal as Dec
+
+    load_dotenv()
+
+    # date 파싱
+    end = (
+        datetime_cls.strptime(args.end, "%Y-%m-%d").date()
+        if args.end else date_cls.today()
+    )
+    # start 기본: end - 365 일
+    if args.start:
+        start = datetime_cls.strptime(args.start, "%Y-%m-%d").date()
+    else:
+        from datetime import timedelta
+        start = end - timedelta(days=365)
+
+    symbols = args.symbols.split(",")
+
+    adapter = _build_adapter(args.exchange, "paper")
+    db = None if args.no_db else DBRecorder()
+
+    # 파라미터 조합 — grid 면 cartesian product
+    if args.grid and args.strategy == "rsi":
+        param_sets = [
+            {"period": p, "oversold": o, "overbought": ob, "size_pct": 0.05}
+            for p in (9, 14, 21)
+            for o in (20, 25, 30)
+            for ob in (70, 75, 80)
+        ]
+    elif args.grid and args.strategy == "ma_cross":
+        param_sets = [
+            {"fast": f, "slow": s, "size_pct": 0.05}
+            for f, s in [(5, 20), (10, 30), (20, 50), (20, 100), (50, 200)]
+        ]
+    else:
+        # 단일 — 기본값 또는 --params 파싱
+        if args.strategy == "rsi":
+            param_sets = [{"period": 14, "oversold": 30, "overbought": 70, "size_pct": 0.05}]
+        elif args.strategy == "ma_cross":
+            param_sets = [{"fast": 20, "slow": 50, "size_pct": 0.05}]
+        else:
+            raise SystemExit(f"unsupported strategy for backtest: {args.strategy}")
+
+    results: list[BacktestResult] = []
+    print(f"\n=== backtest: strategy={args.strategy} symbols={symbols} period={start}→{end} ===\n")
+    for i, params in enumerate(param_sets, 1):
+        # 새 strategy + risk 인스턴스 (state 분리)
+        strategy = STRATEGY_REGISTRY[args.strategy](params)
+        risk = RiskManager(_risk_from_env())
+        engine = BacktestEngine(strategy=strategy, risk=risk)
+
+        config = BacktestConfig(
+            strategy_name=args.strategy,
+            strategy_params=params,
+            symbols=symbols,
+            start=start,
+            end=end,
+            interval=args.interval,
+            initial_capital=Dec(args.capital),
+        )
+        try:
+            result = await engine.run(adapter=adapter, config=config)
+        except Exception as e:
+            print(f"  [{i}/{len(param_sets)}] params={params} → ERROR: {e}")
+            continue
+
+        print(f"  [{i}/{len(param_sets)}] {result.summary()}")
+        results.append(result)
+
+        # DB 기록
+        if db:
+            try:
+                await db.record_backtest(
+                    strategy_type=args.strategy,
+                    symbols=symbols,
+                    start_date=start.isoformat(),
+                    end_date=end.isoformat(),
+                    initial_capital=Dec(args.capital),
+                    final_value=result.final_value,
+                    total_return_pct=result.total_return_pct,
+                    sharpe=result.sharpe,
+                    max_drawdown_pct=result.max_drawdown_pct,
+                    trade_count=result.trade_count,
+                    win_rate_pct=result.win_rate_pct,
+                    params=params,
+                    trades_summary=[
+                        {
+                            "symbol": t.symbol,
+                            "side": t.side,
+                            "qty": str(t.qty),
+                            "price": str(t.price),
+                            "pnl": str(t.pnl),
+                            "reasoning": t.reasoning[:100],
+                        }
+                        for t in result.trades
+                    ],
+                )
+            except Exception as e:
+                log.warning("backtest.db.record.failed", error=str(e))
+
+    # best 선택
+    if results:
+        best_return = max(results, key=lambda r: r.total_return_pct)
+        best_sharpe = max(results, key=lambda r: r.sharpe)
+        print(f"\n--- top by return ---\n  {best_return.summary()}")
+        print(f"--- top by sharpe ---\n  {best_sharpe.summary()}")
+
+    await adapter.close()
+    if db:
+        await db.close()
+
+
 async def _run_all(args: argparse.Namespace) -> None:
     """3개 거래소 봇 동시 실행 (paper 전용)."""
     load_dotenv()
@@ -290,6 +406,19 @@ def main() -> None:
         help="Supabase 기록 비활성 (DB 없이 봇 실행)",
     )
 
+    # backtest: 단일/grid search 백테스트
+    bt = sub.add_parser("backtest", help="historical 데이터로 전략 백테스트")
+    bt.add_argument("--exchange", choices=["alpaca", "binance", "upbit"], default="alpaca",
+                    help="historical 데이터 소스")
+    bt.add_argument("--strategy", choices=["rsi", "ma_cross"], required=True)
+    bt.add_argument("--symbols", required=True, help="콤마구분")
+    bt.add_argument("--start", help="YYYY-MM-DD (기본: end - 365)")
+    bt.add_argument("--end", help="YYYY-MM-DD (기본: today)")
+    bt.add_argument("--interval", default="1d", choices=["1m", "5m", "15m", "1h", "1d"])
+    bt.add_argument("--capital", default="10000", help="초기 자본")
+    bt.add_argument("--grid", action="store_true", help="파라미터 grid search")
+    bt.add_argument("--no-db", action="store_true", help="DB 기록 비활성")
+
     # run-all: 3개 거래소 (Alpaca + Binance + Upbit paper) 동시 실행
     run_all = sub.add_parser(
         "run-all",
@@ -318,6 +447,14 @@ def main() -> None:
             raise
         except Exception as e:
             log.error("multi-bot.fatal", error=repr(e))
+            sys.exit(1)
+    elif args.cmd == "backtest":
+        try:
+            asyncio.run(_run_backtest(args))
+        except SystemExit:
+            raise
+        except Exception as e:
+            log.error("backtest.fatal", error=repr(e))
             sys.exit(1)
 
 

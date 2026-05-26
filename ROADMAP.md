@@ -13,7 +13,8 @@
 - [x] **Day 3** Binance testnet WebSocket + 실주문 (BTCUSDT 매수 즉시 체결)
 - [x] **Day 3** Upbit WebSocket 시세 (public_only) + PaperExchange 시뮬레이션
 - [x] **Day 3** 멀티 거래소 동시 운영 (`run-all` CLI, asyncio.gather)
-- [ ] **Day 4** RSI / MA cross 백테스트 엔진 (vectorbt) + 결과 저장
+- [x] **Day 4** 자체 백테스트 엔진 + RSI/MA cross grid search (32건 DB 저장)
+- [x] **Day 4** 전략 파라미터 튜닝 — Best RSI(14, 30/75) Sharpe 1.10 return +102.96%
 - [ ] **Day 5** Risk manager 통합 테스트 + dry-run 모드 검증
 - [ ] **Day 6** Web 대시보드 1차: 포지션·주문·시그널 조회 페이지
 - [ ] **Day 7** Web 대시보드 2차: 워치리스트 편집·전략 활성화 UI

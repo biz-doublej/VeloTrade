@@ -3,33 +3,47 @@
 # =============================================================================
 # 사용: cp configs/strategies.example.yaml configs/strategies.yaml
 #       python -m velotrade_trading run --config configs/strategies.yaml
+#
+# 파라미터는 Day 4 백테스트 grid search 결과 기준 (Top by Sharpe).
+# 5.8년치 AAPL/MSFT/NVDA 일봉:
+#   - RSI(14, 30/75) : Sharpe 1.10  return +102.96%  drawdown 19.15%
+#   - RSI(21, 30/70) : Sharpe 1.01  return  +37.79%  drawdown  8.69%  (안전 우선)
+#   - RSI(14, 25/80) : Sharpe 1.03  return  +53.75%  drawdown 13.10%
+#
+# ⚠️ 백테스트 결과는 보장 아님:
+#   - AAPL/MSFT/NVDA 는 mega-cap 성장주 — 대부분 종목엔 다르게 작동
+#   - intraday 동작·세금·실슬리피지 미반영
+#   - past performance ≠ future result
 
-# 거래소·모드: paper 가 기본. live 는 CLI 에서 --i-know-this-is-live 도 함께 줘야 함.
+# 거래소·모드
 exchange: alpaca       # alpaca | binance | upbit
-mode: paper            # paper | live
+mode: paper
 
-# 추적 종목
+# 추적 종목 (지정 없으면 vt.watchlist_items 자동 사용)
 symbols:
   - AAPL
   - MSFT
   - NVDA
 
-# 전략 목록 — 여러 개 동시 실행 가능. 시그널은 종목별로 합쳐 첫 actionable 1개만 처리.
+# 전략 — 동시 다중 전략 OK
 strategies:
+  # 메인: drawdown 우선 (Sharpe 1.01, dd 8.69%)
   - name: rsi
-    period: 14
+    period: 21
     oversold: 30
     overbought: 70
-    size_pct: 0.05         # 자본의 5% 까지 (RiskManager 가 다시 한도 적용)
-
-  - name: ma_cross
-    fast: 20
-    slow: 50
     size_pct: 0.05
 
-  - name: llm_signal
-    provider: openai       # openai | gemini
-    model: gpt-4o-mini
-    symbols: [AAPL, MSFT, NVDA]
-    max_size_pct: 0.05
-    min_confidence: 0.65
+  # 보조: golden/dead cross (Sharpe 0.36, trends 잡을 때만)
+  # - name: ma_cross
+  #   fast: 20
+  #   slow: 50
+  #   size_pct: 0.03
+
+  # LLM 시그널 (Day 11 이후 정식 통합)
+  # - name: llm_signal
+  #   provider: openai
+  #   model: gpt-4o-mini
+  #   symbols: [AAPL, MSFT, NVDA]
+  #   max_size_pct: 0.05
+  #   min_confidence: 0.65
