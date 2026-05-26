@@ -7,13 +7,15 @@
 
 - [x] **Day 1** Next.js 14 + Supabase 셋업, "Hello VeloTrade" 배포
 - [x] **Day 1** `trading/` Python 모듈 골격 (어댑터·전략·리스크·러너·CLI)
-- [ ] **Day 2** Alpaca paper 어댑터 실가동 (시세·계좌·주문 end-to-end)
-- [ ] **Day 3** Binance testnet + Upbit paper(시뮬레이터) 실가동
+- [x] **Day 2** Alpaca paper 실가동 (시세·계좌·주문 end-to-end)
+- [x] **Day 2** Supabase 스키마 + Python DB 기록 레이어 + 시드 데이터 (3 계좌, 17 종목)
+- [x] **Day 2** Alpaca WebSocket 시세 스트림 (IEX feed)
+- [ ] **Day 3** Binance testnet WebSocket + Upbit paper(시뮬레이터) 실가동
 - [ ] **Day 4** RSI / MA cross 백테스트 엔진 (vectorbt) + 결과 저장
 - [ ] **Day 5** Risk manager 통합 테스트 + dry-run 모드 검증
-- [ ] **Day 6** Supabase 트레이딩 스키마 (`03_trading_schema.sql`) 적용, Python → DB 기록 레이어
-- [ ] **Day 7** Web 대시보드: 포지션·주문·시그널 조회 페이지 (Next.js + Supabase)
-- [ ] **Day 8** 시세 스트림 websocket 전환 (Alpaca StockDataStream, Binance/Upbit ws)
+- [ ] **Day 6** Web 대시보드 1차: 포지션·주문·시그널 조회 페이지
+- [ ] **Day 7** Web 대시보드 2차: 워치리스트 편집·전략 활성화 UI
+- [ ] **Day 8** 사용자 인증 (Supabase Auth, 이메일)
 - [ ] **Day 9** 사용자 인증 (Supabase Auth, 이메일 — 본인 1계정)
 - [ ] **Day 10** 알림 (Discord/Slack/Email), 봇 lifecycle 이벤트
 - [ ] **Day 11** LLM 시그널 ↔ VeloTrade RAG 연동 (DART/네이버 공시·뉴스 이벤트 → LLM → 시그널)

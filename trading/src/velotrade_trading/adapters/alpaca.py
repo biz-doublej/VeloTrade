@@ -198,14 +198,102 @@ class AlpacaExchange(ExchangeAdapter):
         return [Decimal(str(b["c"])) for b in bars]
 
     async def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Quote]:
-        # 임시 polling. Day 2-3 에 alpaca-py StockDataStream 으로 교체.
+        """Alpaca WebSocket 시세 스트림 (IEX feed).
+
+        Free/Basic plan: wss://stream.data.alpaca.markets/v2/iex
+        Pro: /v2/sip 추가 가능.
+
+        장 마감 중에는 메시지가 거의 안 옴 — 그게 정상.
+        connection 실패 시 5초 후 재시도 (무한 루프).
+        """
+        import json
+        import websockets
+
+        ws_url = "wss://stream.data.alpaca.markets/v2/iex"
+
         while True:
-            for sym in symbols:
-                try:
-                    yield await self.get_quote(sym)
-                except Exception:
-                    continue
-            await asyncio.sleep(5.0)
+            try:
+                async with websockets.connect(
+                    ws_url, ping_interval=30, ping_timeout=20, max_size=2**20
+                ) as ws:
+                    # 1. 서버 인사 메시지 수신 (connected)
+                    hello = await ws.recv()
+
+                    # 2. 인증
+                    await ws.send(
+                        json.dumps({"action": "auth", "key": self._key, "secret": self._secret})
+                    )
+                    auth_resp = await ws.recv()
+                    auth_data = json.loads(auth_resp)
+                    if not (isinstance(auth_data, list) and auth_data and
+                            auth_data[0].get("T") == "success"):
+                        raise RuntimeError(f"alpaca ws auth failed: {auth_data}")
+
+                    # 3. quotes + trades 구독
+                    await ws.send(
+                        json.dumps({"action": "subscribe", "quotes": symbols, "trades": symbols})
+                    )
+                    sub_resp = await ws.recv()  # subscription 확인 (메시지 일단 소비)
+                    _ = sub_resp
+
+                    # 4. 메시지 루프
+                    last_quote: dict[str, Quote] = {}
+                    async for raw in ws:
+                        try:
+                            messages = json.loads(raw)
+                        except json.JSONDecodeError:
+                            continue
+                        for msg in messages:
+                            t = msg.get("T")
+                            if t == "q":  # quote
+                                bp = msg.get("bp")
+                                ap = msg.get("ap")
+                                if bp is None or ap is None:
+                                    continue
+                                bid = Decimal(str(bp))
+                                ask = Decimal(str(ap))
+                                q = Quote(
+                                    symbol=msg["S"],
+                                    bid=bid,
+                                    ask=ask,
+                                    last=(bid + ask) / Decimal(2),
+                                    timestamp=datetime.utcnow(),
+                                    exchange=self.name,
+                                    asset_class=AssetClass.US_STOCK,
+                                    raw=msg,
+                                )
+                                last_quote[msg["S"]] = q
+                                yield q
+                            elif t == "t":  # trade — last price 업데이트
+                                p = msg.get("p")
+                                if p is None:
+                                    continue
+                                price = Decimal(str(p))
+                                prev = last_quote.get(msg["S"])
+                                if prev is None:
+                                    continue
+                                # last 만 갱신해서 yield (전략의 RSI 계산에 사용)
+                                q = Quote(
+                                    symbol=msg["S"],
+                                    bid=prev.bid,
+                                    ask=prev.ask,
+                                    last=price,
+                                    timestamp=datetime.utcnow(),
+                                    exchange=self.name,
+                                    asset_class=AssetClass.US_STOCK,
+                                    raw=msg,
+                                )
+                                last_quote[msg["S"]] = q
+                                yield q
+            except (
+                websockets.exceptions.ConnectionClosed,
+                websockets.exceptions.WebSocketException,
+                ConnectionError,
+                OSError,
+            ) as e:
+                # 재연결 대기 후 재시도
+                await asyncio.sleep(5.0)
+                continue
 
     # --- 주문 ---------------------------------------------------------------
 
