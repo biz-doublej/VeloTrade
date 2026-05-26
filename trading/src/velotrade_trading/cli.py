@@ -26,12 +26,27 @@ from dotenv import load_dotenv
 from velotrade_trading.adapters.base import ExchangeAdapter
 from velotrade_trading.adapters.paper import PaperExchange
 from velotrade_trading.core.risk import RiskConfig, RiskManager
+from velotrade_trading.db.client import DBRecorder, get_or_create_account, get_watchlist
 from velotrade_trading.runner.alerts import AlertManager
 from velotrade_trading.runner.bot import BotConfig, TradingBot
 from velotrade_trading.strategies import STRATEGY_REGISTRY
 from velotrade_trading.strategies.base import Strategy
 
 log = structlog.get_logger("cli")
+
+
+# 거래소별 기본 시드 계좌 라벨 (seed_db.py 와 일치)
+_DEFAULT_ACCOUNT_LABEL = {
+    "alpaca": "default",
+    "binance": "testnet-default",
+    "upbit": "simulated-default",
+}
+_BASE_CURRENCY = {"alpaca": "USD", "binance": "USDT", "upbit": "KRW"}
+_STARTING_CAPITAL = {
+    "alpaca": Decimal("100000"),
+    "binance": Decimal("10000"),
+    "upbit": Decimal("10000000"),
+}
 
 
 def _build_adapter(exchange: str, mode: str) -> ExchangeAdapter:
@@ -94,6 +109,47 @@ def _risk_from_env() -> RiskConfig:
     )
 
 
+async def _build_db_and_account(
+    exchange: str, mode: str, disable_db: bool
+) -> tuple[DBRecorder | None, str | None]:
+    """Supabase 연결 + 계좌 ID 확보. 실패 시 (None, None) 으로 폴백 (DB 없이 봇 실행)."""
+    if disable_db:
+        return None, None
+    if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_ROLE_KEY"):
+        log.warning("db.disabled.no_env")
+        return None, None
+    try:
+        db = DBRecorder()
+        account_id = await get_or_create_account(
+            db,
+            exchange=exchange,
+            account_type=mode,
+            label=_DEFAULT_ACCOUNT_LABEL[exchange],
+            base_currency=_BASE_CURRENCY[exchange],
+            starting_capital=_STARTING_CAPITAL[exchange],
+        )
+        return db, account_id
+    except Exception as e:
+        log.warning("db.init.failed", error=str(e))
+        return None, None
+
+
+async def _resolve_symbols(
+    args_symbols: str | None, config_symbols: list[str], db: DBRecorder | None, exchange: str
+) -> list[str]:
+    """우선순위: --symbols > config.symbols > DB watchlist."""
+    if args_symbols:
+        return args_symbols.split(",")
+    if config_symbols:
+        return config_symbols
+    if db:
+        wl = await get_watchlist(db, exchange=exchange)
+        if wl:
+            log.info("symbols.from.db", count=len(wl))
+            return wl
+    raise SystemExit("--symbols / config.symbols / watchlist all empty")
+
+
 async def _run(args: argparse.Namespace) -> None:
     load_dotenv()
 
@@ -112,9 +168,13 @@ async def _run(args: argparse.Namespace) -> None:
             "Re-run with --i-know-this-is-live to confirm."
         )
 
-    symbols = args.symbols.split(",") if args.symbols else config_data.get("symbols", [])
-    if not symbols:
-        raise SystemExit("--symbols or config.symbols required")
+    # DB + 계좌 ID 확보 (실패해도 진행)
+    db, account_id = await _build_db_and_account(exchange, mode, args.no_db)
+
+    # 종목 결정
+    symbols = await _resolve_symbols(
+        args.symbols, config_data.get("symbols", []), db, exchange
+    )
 
     adapter = _build_adapter(exchange, mode)
     strategies = _build_strategies(config_data.get("strategies"))
@@ -126,6 +186,8 @@ async def _run(args: argparse.Namespace) -> None:
         strategies=strategies,
         risk=risk,
         alerts=alerts,
+        db=db,
+        account_id=account_id,
         config=BotConfig(
             symbols=symbols,
             dry_run=args.dry_run,
@@ -154,12 +216,17 @@ def main() -> None:
         action="store_true",
         help="LIVE 모드 확인 (이게 없으면 LIVE 시작 거부)",
     )
-    run.add_argument("--symbols", help="콤마구분 (예: AAPL,MSFT)")
+    run.add_argument("--symbols", help="콤마구분 (예: AAPL,MSFT). 없으면 DB watchlist 사용")
     run.add_argument("--config", help="YAML 설정 경로")
     run.add_argument(
         "--dry-run",
         action="store_true",
         help="시그널만 출력, 주문 차단",
+    )
+    run.add_argument(
+        "--no-db",
+        action="store_true",
+        help="Supabase 기록 비활성 (DB 없이 봇 실행)",
     )
 
     args = parser.parse_args()

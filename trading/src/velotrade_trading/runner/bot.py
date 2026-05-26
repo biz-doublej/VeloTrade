@@ -3,15 +3,15 @@
 루프 개요:
   - 시작 시 portfolio 동기화 + 각 전략 warmup
   - 시세 스트림 구독 → 매 quote 마다 전략 호출 → 시그널 생성
-  - 시그널 → RiskManager.validate → Order
-  - --dry-run: 시그널만 출력, 주문 차단
+  - 시그널 → DBRecorder.record_signal → RiskManager.validate → Order
   - paper 모드: 어댑터가 paper/testnet 이면 자동 안전
+  - 주문 결과·포지션·알림 → Supabase 기록 (best-effort)
 """
 
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import structlog
 
@@ -19,6 +19,7 @@ from velotrade_trading.adapters.base import ExchangeAdapter
 from velotrade_trading.core.portfolio import Portfolio
 from velotrade_trading.core.risk import RiskManager, RiskRejected
 from velotrade_trading.core.types import Quote, Signal
+from velotrade_trading.db.client import DBRecorder
 from velotrade_trading.runner.alerts import AlertManager
 from velotrade_trading.strategies.base import Strategy, StrategyContext
 
@@ -43,12 +44,16 @@ class TradingBot:
         risk: RiskManager,
         config: BotConfig,
         alerts: AlertManager | None = None,
+        db: DBRecorder | None = None,
+        account_id: str | None = None,
     ) -> None:
         self.adapter = adapter
         self.strategies = strategies
         self.risk = risk
         self.config = config
         self.alerts = alerts or AlertManager()
+        self.db = db                       # None 이면 DB 기록 안 함 (백테스트·임시 실행용)
+        self.account_id = account_id       # DB 의 vt.exchange_accounts.account_id
         self.portfolio = Portfolio(exchange=adapter.name, currency=adapter.quote_currency)
         self._ctx: StrategyContext | None = None
         self._stopping = False
@@ -62,12 +67,24 @@ class TradingBot:
             )
 
         await self._refresh_portfolio()
-        await self.alerts.info(
-            f"VeloTrade bot started ({self.adapter.name})",
+
+        startup_msg = (
             f"mode={'paper' if self.adapter.is_paper else 'LIVE'}, "
             f"dry_run={self.config.dry_run}, symbols={self.config.symbols}, "
-            f"equity={self.portfolio.equity}",
+            f"equity={self.portfolio.equity}, db={'ON' if self.db else 'OFF'}"
         )
+        await self.alerts.info(
+            f"VeloTrade bot started ({self.adapter.name})",
+            startup_msg,
+        )
+        if self.db:
+            await self.db.record_alert(
+                level="info",
+                alert_type="bot_lifecycle",
+                title=f"bot started ({self.adapter.name})",
+                body=startup_msg,
+                meta={"account_id": self.account_id},
+            )
 
         self._ctx = StrategyContext(
             adapter=self.adapter,
@@ -91,6 +108,15 @@ class TradingBot:
 
     async def stop(self) -> None:
         self._stopping = True
+        if self.db:
+            await self.db.record_alert(
+                level="info",
+                alert_type="bot_lifecycle",
+                title=f"bot stopped ({self.adapter.name})",
+                body=f"final equity={self.portfolio.equity}",
+                meta={"account_id": self.account_id},
+            )
+            await self.db.close()
         await self.adapter.close()
         await self.alerts.info("VeloTrade bot stopped")
 
@@ -118,6 +144,11 @@ class TradingBot:
         )
         self.portfolio.set_cash(cash)
         self.portfolio.replace_positions(positions)
+
+        # DB 동기화 (best-effort)
+        if self.db and self.account_id:
+            for pos in positions:
+                await self.db.upsert_position(account_id=self.account_id, position=pos)
 
     # --- 시그널 → 주문 ------------------------------------------------------
 
@@ -157,33 +188,61 @@ class TradingBot:
             reasoning=signal.reasoning,
         )
 
+        # 시그널 자체는 DB 에 항상 기록 (risk 거부 여부와 무관하게 trace)
+        signal_id: str | None = None
         try:
-            order = self.risk.validate(signal, self.portfolio, quote)
+            order_attempt = self.risk.validate(signal, self.portfolio, quote)
         except RiskRejected as e:
+            if self.db:
+                signal_id = await self.db.record_signal(
+                    signal,
+                    rejected_by_risk=True,
+                    reject_reason=str(e),
+                )
             await self.alerts.warn(
                 f"Signal rejected by RiskManager: {signal.symbol}",
                 f"strategy={signal.strategy}, reason={e}, signal={signal.reasoning}",
             )
             return
 
+        # 통과한 시그널 기록
+        if self.db:
+            signal_id = await self.db.record_signal(signal, rejected_by_risk=False)
+
         if self.config.dry_run:
             await self.alerts.info(
-                f"[DRY-RUN] Would submit: {order.side.upper()} {order.qty} {order.symbol}",
+                f"[DRY-RUN] Would submit: {order_attempt.side.upper()} "
+                f"{order_attempt.qty} {order_attempt.symbol}",
                 f"strategy={signal.strategy}, reasoning={signal.reasoning}",
             )
             return
 
         try:
-            result = await self.adapter.submit_order(order)
+            result = await self.adapter.submit_order(order_attempt)
         except Exception as e:
             await self.alerts.error(
-                f"Order submission failed: {order.symbol}",
-                f"error={e!r}, order={order}",
+                f"Order submission failed: {order_attempt.symbol}",
+                f"error={e!r}, order={order_attempt}",
             )
+            if self.db:
+                await self.db.record_alert(
+                    level="error",
+                    alert_type="order",
+                    title=f"order submit failed: {order_attempt.symbol}",
+                    body=f"error={e!r}",
+                    symbol=order_attempt.symbol,
+                    meta={"account_id": self.account_id, "signal_id": signal_id},
+                )
             return
 
+        # 주문 결과 DB 기록
+        if self.db:
+            await self.db.record_order(
+                result, signal_id=signal_id, account_id=self.account_id
+            )
+
         await self.alerts.trade(
-            f"{order.side.upper()} {order.qty} {order.symbol} @ ~{quote.last}",
+            f"{result.side.upper()} {result.qty} {result.symbol} @ ~{quote.last}",
             f"strategy={signal.strategy} | status={result.status} | "
             f"exchange_order_id={result.exchange_order_id} | reasoning={signal.reasoning}",
         )
