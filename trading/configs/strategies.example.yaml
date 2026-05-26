@@ -1,0 +1,35 @@
+# =============================================================================
+# VeloTrade trading — 전략 설정 예시
+# =============================================================================
+# 사용: cp configs/strategies.example.yaml configs/strategies.yaml
+#       python -m velotrade_trading run --config configs/strategies.yaml
+
+# 거래소·모드: paper 가 기본. live 는 CLI 에서 --i-know-this-is-live 도 함께 줘야 함.
+exchange: alpaca       # alpaca | binance | upbit
+mode: paper            # paper | live
+
+# 추적 종목
+symbols:
+  - AAPL
+  - MSFT
+  - NVDA
+
+# 전략 목록 — 여러 개 동시 실행 가능. 시그널은 종목별로 합쳐 첫 actionable 1개만 처리.
+strategies:
+  - name: rsi
+    period: 14
+    oversold: 30
+    overbought: 70
+    size_pct: 0.05         # 자본의 5% 까지 (RiskManager 가 다시 한도 적용)
+
+  - name: ma_cross
+    fast: 20
+    slow: 50
+    size_pct: 0.05
+
+  - name: llm_signal
+    provider: openai       # openai | gemini
+    model: gpt-4o-mini
+    symbols: [AAPL, MSFT, NVDA]
+    max_size_pct: 0.05
+    min_confidence: 0.65

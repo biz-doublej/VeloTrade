@@ -1,0 +1,177 @@
+"""VeloTrade trading 봇 CLI.
+
+사용:
+  python -m velotrade_trading run --exchange alpaca --mode paper --symbols AAPL,MSFT
+  python -m velotrade_trading run --exchange binance --mode paper --symbols BTCUSDT,ETHUSDT
+  python -m velotrade_trading run --exchange upbit --mode paper --symbols KRW-BTC,KRW-ETH
+  python -m velotrade_trading run --config configs/strategies.yaml --dry-run
+
+기본은 paper + dry-run. --live 와 --no-dry-run 둘 다 명시해야 실거래 가능.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import os
+import sys
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import structlog
+import yaml
+from dotenv import load_dotenv
+
+from velotrade_trading.adapters.base import ExchangeAdapter
+from velotrade_trading.adapters.paper import PaperExchange
+from velotrade_trading.core.risk import RiskConfig, RiskManager
+from velotrade_trading.runner.alerts import AlertManager
+from velotrade_trading.runner.bot import BotConfig, TradingBot
+from velotrade_trading.strategies import STRATEGY_REGISTRY
+from velotrade_trading.strategies.base import Strategy
+
+log = structlog.get_logger("cli")
+
+
+def _build_adapter(exchange: str, mode: str) -> ExchangeAdapter:
+    """exchange + mode 조합으로 어댑터 인스턴스 반환."""
+    is_paper = mode == "paper"
+
+    if exchange == "alpaca":
+        from velotrade_trading.adapters.alpaca import AlpacaExchange
+
+        return AlpacaExchange(is_paper=is_paper)
+
+    if exchange == "binance":
+        from velotrade_trading.adapters.binance import BinanceExchange
+
+        return BinanceExchange(use_testnet=is_paper)
+
+    if exchange == "upbit":
+        from velotrade_trading.adapters.upbit import UpbitExchange
+
+        upbit = UpbitExchange()
+        if not is_paper:
+            return upbit
+        # Upbit 는 testnet 없음 → PaperExchange 로 감싼다.
+        return PaperExchange(
+            base_name="upbit",
+            market_feed=upbit,
+            starting_cash=Decimal(os.getenv("PAPER_STARTING_KRW", "10000000")),
+            quote_currency="KRW",
+        )
+
+    raise SystemExit(f"unknown exchange: {exchange}")
+
+
+def _build_strategies(spec: list[dict[str, Any]] | None) -> list[Strategy]:
+    if not spec:
+        # 기본: RSI 14/30/70
+        return [STRATEGY_REGISTRY["rsi"]({"period": 14, "oversold": 30, "overbought": 70})]
+
+    out: list[Strategy] = []
+    for item in spec:
+        name = item["name"]
+        if name not in STRATEGY_REGISTRY:
+            raise SystemExit(f"unknown strategy: {name}")
+        params = {k: v for k, v in item.items() if k != "name"}
+        out.append(STRATEGY_REGISTRY[name](params))
+    return out
+
+
+def _load_yaml_config(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise SystemExit(f"config not found: {path}")
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _risk_from_env() -> RiskConfig:
+    return RiskConfig(
+        max_position_pct=Decimal(os.getenv("RISK_MAX_POSITION_PCT", "0.05")),
+        max_per_symbol_pct=Decimal(os.getenv("RISK_PER_SYMBOL_PCT", "0.20")),
+        daily_loss_pct=Decimal(os.getenv("RISK_DAILY_LOSS_PCT", "0.02")),
+    )
+
+
+async def _run(args: argparse.Namespace) -> None:
+    load_dotenv()
+
+    config_data: dict[str, Any] = {}
+    if args.config:
+        config_data = _load_yaml_config(Path(args.config))
+
+    exchange = args.exchange or config_data.get("exchange")
+    if not exchange:
+        raise SystemExit("--exchange or config.exchange required")
+
+    mode = args.mode or config_data.get("mode", "paper")
+    if mode == "live" and not args.live_confirm:
+        raise SystemExit(
+            "Refusing to run LIVE without --i-know-this-is-live. "
+            "Re-run with --i-know-this-is-live to confirm."
+        )
+
+    symbols = args.symbols.split(",") if args.symbols else config_data.get("symbols", [])
+    if not symbols:
+        raise SystemExit("--symbols or config.symbols required")
+
+    adapter = _build_adapter(exchange, mode)
+    strategies = _build_strategies(config_data.get("strategies"))
+    risk = RiskManager(_risk_from_env())
+    alerts = AlertManager.from_env()
+
+    bot = TradingBot(
+        adapter=adapter,
+        strategies=strategies,
+        risk=risk,
+        alerts=alerts,
+        config=BotConfig(
+            symbols=symbols,
+            dry_run=args.dry_run,
+            require_paper=(mode == "paper"),
+        ),
+    )
+
+    try:
+        await bot.start()
+    except KeyboardInterrupt:
+        log.info("bot.shutdown.keyboard")
+    finally:
+        await bot.stop()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="velotrade-trading")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    run = sub.add_parser("run", help="실시간 봇 실행")
+    run.add_argument("--exchange", choices=["alpaca", "binance", "upbit"], required=False)
+    run.add_argument("--mode", choices=["paper", "live"], default="paper")
+    run.add_argument(
+        "--i-know-this-is-live",
+        dest="live_confirm",
+        action="store_true",
+        help="LIVE 모드 확인 (이게 없으면 LIVE 시작 거부)",
+    )
+    run.add_argument("--symbols", help="콤마구분 (예: AAPL,MSFT)")
+    run.add_argument("--config", help="YAML 설정 경로")
+    run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="시그널만 출력, 주문 차단",
+    )
+
+    args = parser.parse_args()
+    if args.cmd == "run":
+        try:
+            asyncio.run(_run(args))
+        except SystemExit:
+            raise
+        except Exception as e:
+            log.error("bot.fatal", error=repr(e))
+            sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

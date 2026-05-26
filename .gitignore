@@ -95,3 +95,15 @@ web/.vercel/
 web/next-env.d.ts
 web/.turbo/
 web/tsconfig.tsbuildinfo
+
+# ------------------------------------------------------------------------------
+# trading/ — Python 자동매매 모듈
+# ------------------------------------------------------------------------------
+trading/.venv/
+trading/configs/strategies.yaml
+trading/configs/universe.yaml
+trading/configs/*.yaml
+!trading/configs/*.example.yaml
+trading/state/
+trading/logs/
+*.egg-info/
