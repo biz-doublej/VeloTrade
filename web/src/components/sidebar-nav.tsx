@@ -11,6 +11,7 @@ const ITEMS = [
   { href: "/dashboard/backtests", label: "Backtests", emoji: "🔬" },
   { href: "/dashboard/watchlist", label: "Watchlist", emoji: "👁️" },
   { href: "/dashboard/strategies", label: "Strategies", emoji: "⚙️" },
+  { href: "/dashboard/alerts", label: "Alerts", emoji: "🔔" },
 ];
 
 export function SidebarNav() {

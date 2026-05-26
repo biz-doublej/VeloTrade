@@ -26,8 +26,9 @@
 - [x] **Day 8** Supabase Auth (Magic Link) + middleware 가드
   + ALLOWED_EMAIL env 화이트리스트로 본인 1계정만 허용
   + /login, /auth/callback, /auth/logout, sidebar 사용자 정보
-- [ ] **Day 9** 사용자 인증 (Supabase Auth, 이메일 — 본인 1계정)
-- [ ] **Day 10** 알림 (Discord/Slack/Email), 봇 lifecycle 이벤트
+- [x] **Day 9** 알림 (Discord rich embed + Slack mrkdwn + stdout)
+  + 429 자동 재시도 + URL 마스킹 로깅 + 안전 truncate
+  + /dashboard/alerts 페이지 — 최근 100건 + webhook 설정 안내
 - [ ] **Day 11** LLM 시그널 ↔ VeloTrade RAG 연동 (DART/네이버 공시·뉴스 이벤트 → LLM → 시그널)
 - [ ] **Day 12** 리밸런싱: 목표 비중 vs 현재 비중 diff → 자동 주문
 - [ ] **Day 13** 백테스트 시각화 (equity curve, drawdown) + 멀티 거래소 통합 테스트
