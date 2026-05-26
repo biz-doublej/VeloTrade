@@ -9,6 +9,8 @@ const ITEMS = [
   { href: "/dashboard/orders", label: "Orders", emoji: "📝" },
   { href: "/dashboard/signals", label: "Signals", emoji: "📡" },
   { href: "/dashboard/backtests", label: "Backtests", emoji: "🔬" },
+  { href: "/dashboard/watchlist", label: "Watchlist", emoji: "👁️" },
+  { href: "/dashboard/strategies", label: "Strategies", emoji: "⚙️" },
 ];
 
 export function SidebarNav() {
