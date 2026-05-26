@@ -160,21 +160,41 @@ class AlpacaExchange(ExchangeAdapter):
     async def get_historical_closes(
         self, symbol: str, *, limit: int = 200, interval: str = "1d"
     ) -> list[Decimal]:
-        # alpaca timeframe: 1Min, 5Min, 15Min, 1Hour, 1Day
+        # Alpaca timeframe: 1Min, 5Min, 15Min, 1Hour, 1Day
         tf_map = {"1m": "1Min", "5m": "5Min", "15m": "15Min", "1h": "1Hour", "1d": "1Day"}
         tf = tf_map.get(interval, "1Day")
-        end = datetime.utcnow() - timedelta(minutes=16)  # SIP 데이터 16분 지연
+
+        # Alpaca free tier (IEX) 는 start 파라미터가 없으면 bars=null 로 응답.
+        # interval 별로 limit 만큼 거꾸로 가는 start 계산 (주말·공휴일 여유 2배).
+        lookback_days = {
+            "1m": max(1, limit // (60 * 6)) * 2,   # 6.5h 거래시간 가정
+            "5m": max(1, limit // 78) * 2,
+            "15m": max(1, limit // 26) * 2,
+            "1h": max(1, limit // 7) * 2,
+            "1d": limit * 2,
+        }.get(interval, limit * 2)
+        # 최소 30일은 확보 (warmup 안정성)
+        lookback_days = max(lookback_days, 30)
+
+        end = datetime.utcnow() - timedelta(days=1)        # IEX 지연 회피
+        start = end - timedelta(days=lookback_days)
         r = await self._data_client.get(
             f"/v2/stocks/{symbol}/bars",
             params={
                 "timeframe": tf,
                 "limit": limit,
-                "end": end.isoformat() + "Z",
+                "start": start.strftime("%Y-%m-%d"),
+                "end": end.strftime("%Y-%m-%d"),
+                "feed": "iex",
                 "adjustment": "raw",
             },
         )
         r.raise_for_status()
-        bars = r.json().get("bars", [])
+        data = r.json()
+        bars = data.get("bars") or []
+        # Alpaca v2 는 단일 종목 요청도 dict({symbol: [...]}) 형태로 오기도 함
+        if isinstance(bars, dict):
+            bars = bars.get(symbol, [])
         return [Decimal(str(b["c"])) for b in bars]
 
     async def stream_quotes(self, symbols: list[str]) -> AsyncIterator[Quote]:
