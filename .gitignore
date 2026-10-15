@@ -107,3 +107,8 @@ trading/configs/*.yaml
 trading/state/
 trading/logs/
 *.egg-info/
+
+# training/event_alpha - data/model/experiment outputs (never commit)
+data/
+artifacts/
+*.parquet

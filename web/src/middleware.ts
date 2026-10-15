@@ -42,7 +42,7 @@ export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
   // /dashboard/* — 미인증 차단
-  if (!user && path.startsWith("/dashboard")) {
+  if (!user && (path.startsWith("/dashboard") || path.startsWith("/training"))) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", path);

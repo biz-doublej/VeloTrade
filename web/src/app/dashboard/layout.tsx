@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { SidebarNav } from "@/components/sidebar-nav";
+import { TrainingWidget } from "@/components/training/training-widget";
 import { createAuthClient } from "@/lib/supabase/server-auth";
 
 export default async function DashboardLayout({
@@ -19,6 +20,7 @@ export default async function DashboardLayout({
           <span className="text-lg font-bold tracking-tight">VeloTrade</span>
         </Link>
         <SidebarNav />
+        <TrainingWidget />
 
         <div className="mt-auto px-3 flex flex-col gap-2">
           {user ? (
